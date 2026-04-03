@@ -1,21 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, Shield, Users, Briefcase, FileText, Settings, UserPlus, AlertCircle } from 'lucide-react';
+import { LogIn, Shield, Users, Briefcase, FileText, Settings, UserPlus, AlertCircle, ShieldAlert, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const roles = [
-  { id: 'engineering', label: 'Engineering', icon: Shield, color: 'rgb(59, 130, 246)' },
-  { id: 'finance', label: 'Finance', icon: Briefcase, color: 'rgb(34, 197, 94)' },
-  { id: 'hr', label: 'Human Resources', icon: Users, color: 'rgb(168, 85, 247)' },
-  { id: 'admin', label: 'Administrator', icon: Settings, color: 'rgb(245, 158, 11)' },
-];
 
 const LoginPage = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState('engineering'); // Only used during Register
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   
@@ -29,13 +21,11 @@ const LoginPage = () => {
 
     try {
       if (isLogin) {
-        // Only need email/password for actual login now mapping to real backend
         const user = await login(email, password);
         navigate(user.role === 'admin' ? '/admin' : '/chat');
       } else {
-        // Used for the initial setup to create an account easily
-        const user = await register(email, password, selectedRole);
-        navigate(user.role === 'admin' ? '/admin' : '/chat');
+        const user = await register(email, password, 'user');
+        navigate('/chat');
       }
     } catch (err) {
       setErrorMsg(err.message);
@@ -45,96 +35,76 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-[#0f172a] p-4 text-[#f8fafc]">
+    <div className="flex items-center justify-center min-h-screen bg-[#f3f4f6] p-4 text-[#111827] font-sans selection:bg-blue-100 relative overflow-hidden">
+      
+      {/* Decorative background circle */}
+      <div className="absolute -top-24 -left-24 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-indigo-500/5 rounded-full blur-[100px] pointer-events-none" />
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-[#1e293b] rounded-2xl shadow-2xl p-8 border border-[#334155] backdrop-blur-sm"
+        className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-[#e5e7eb] relative overflow-hidden"
       >
-        <div className="flex flex-col items-center mb-8">
-          <div className="p-3 bg-blue-500 rounded-xl mb-4 shadow-lg shadow-blue-500/20">
+        {/* Subtle decorative top bar */}
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-600 shadow-[0_4px_10px_rgba(37,99,235,0.1)]" />
+        
+        <div className="flex flex-col items-center mb-10">
+          <div className="p-3 bg-blue-600 rounded-xl mb-6 shadow-md shadow-blue-500/20">
             <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">SecureRAG</h1>
-          <p className="text-[#94a3b8] text-center">
-             {isLogin ? "Enter credentials to access the internal AI" : "Create a new internal account"}
+          <h1 className="text-3xl font-bold tracking-tight mb-2 text-[#111827]">SecureRAG</h1>
+          <p className="text-[#6b7280] text-center font-medium max-w-[280px]">
+             {isLogin ? "Sign in to access secure documents" : "Create your internal company account"}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <AnimatePresence>
+          <AnimatePresence mode="wait">
             {errorMsg && (
               <motion.div 
                 initial={{ opacity: 0, height: 0 }} 
                 animate={{ opacity: 1, height: 'auto' }} 
                 exit={{ opacity: 0, height: 0 }}
-                className="bg-rose-500/10 border border-rose-500/50 text-rose-400 p-3 rounded-lg flex items-center gap-2 text-sm font-medium"
+                className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-center gap-3 text-sm font-semibold"
               >
-                <AlertCircle className="w-4 h-4 shrink-0" />
+                <AlertCircle className="w-5 h-5 shrink-0" />
                 {errorMsg}
               </motion.div>
             )}
           </AnimatePresence>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-[#94a3b8]">Email Address</label>
+            <label className="text-[11px] font-bold text-[#4b5563] ml-1 uppercase tracking-widest">Email Address</label>
             <input 
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-[#475569]"
+              className="w-full bg-white border border-[#d1d5db] rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-[#9ca3af] text-[#111827]"
               placeholder="user@internal.company"
               required
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-[#94a3b8]">Password</label>
+            <label className="text-[11px] font-bold text-[#4b5563] ml-1 uppercase tracking-widest">Password</label>
             <input 
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-[#0f172a] border border-[#334155] rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-[#475569]"
+              className="w-full bg-white border border-[#d1d5db] rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-[#9ca3af] text-[#111827]"
               placeholder="••••••••"
               required
             />
           </div>
 
-          {!isLogin && (
-            <motion.div 
-               initial={{ opacity: 0, height: 0 }} 
-               animate={{ opacity: 1, height: 'auto' }}
-               className="space-y-2"
-            >
-               <label className="text-sm font-medium text-[#94a3b8]">Select RBAC Role</label>
-               <div className="grid grid-cols-2 gap-3">
-                 {roles.map((role) => (
-                   <button
-                     key={role.id}
-                     type="button"
-                     onClick={() => setSelectedRole(role.id)}
-                     className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
-                       selectedRole === role.id 
-                         ? `bg-[${role.color}]/10 border-[${role.color}]/50 text-blue-400 ring-1 ring-blue-500/30` 
-                         : 'bg-[#0f172a] border-[#334155] text-[#94a3b8] hover:border-[#475569]'
-                     }`}
-                     style={selectedRole === role.id ? { color: role.color, borderColor: `${role.color}80`, backgroundColor: `${role.color}15` } : {}}
-                   >
-                     <role.icon className="w-4 h-4" />
-                     {role.label}
-                   </button>
-                 ))}
-               </div>
-            </motion.div>
-          )}
-
           <button 
             type="submit"
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-[#334155] disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg shadow-lg shadow-blue-600/20 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 disabled:text-gray-400 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 mt-4"
           >
             {isLoading ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              <Loader2 className="w-5 h-5 animate-spin" />
             ) : isLogin ? (
               <LogIn className="w-5 h-5" />
             ) : (
@@ -144,15 +114,16 @@ const LoginPage = () => {
           </button>
         </form>
 
-        <div className="mt-6 pt-6 border-t border-[#334155] text-center flex flex-col items-center gap-3">
+        <div className="mt-10 pt-8 border-t border-[#f3f4f6] text-center flex flex-col items-center gap-4">
            <button 
               onClick={() => { setIsLogin(!isLogin); setErrorMsg(null); }}
-              className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors bg-transparent border-none cursor-pointer"
+              className="text-sm font-bold text-blue-600 hover:text-blue-700 transition-colors bg-transparent border-none cursor-pointer"
            >
-             {isLogin ? "Need a demo account? Register here." : "Already have an account? Sign in."}
+             {isLogin ? "Need an account? Register here." : "Already have an account? Sign in."}
            </button>
-           <p className="text-xs text-[#64748b]">
-             Strict usage policies apply. Access is monitored.
+           <p className="text-[10px] text-[#9ca3af] font-bold uppercase tracking-[0.15em] flex items-center gap-2">
+             <ShieldAlert className="w-3.5 h-3.5" />
+             Enterprise-Grade Protection
            </p>
         </div>
       </motion.div>

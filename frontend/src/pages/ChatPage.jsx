@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   Send, 
@@ -15,19 +16,25 @@ import {
   AlertCircle,
   Database,
   ArrowRight,
-  Loader2
+  Loader2,
+  FileUp
 } from 'lucide-react';
+import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const API_URL = 'http://localhost:8000';
 
 const ChatPage = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([
-    { id: '1', role: 'ai', content: `Hello! I'm your SecureRAG assistant. I have access to **${user?.role}** documents and can help you with your queries. How can I assist you today?`, timestamp: new Date() }
+    { id: '1', role: 'ai', content: `Hello! I'm your SecureRAG assistant. I have access to **all** documents and can help you with your queries. How can I assist you today?`, timestamp: new Date() }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,140 +59,141 @@ const ChatPage = () => {
     setInput('');
     setIsTyping(true);
 
-    // Simulate RAG + AI processing
-    setTimeout(() => {
-      const response = generateMockResponse(input, user?.role);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        logout();
+        navigate('/login');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/chat/`,{
+        method:"POST",
+        headers:{
+          "Content-type":"application/json",
+          "Authorization":`Bearer ${token}`
+        },
+        body:JSON.stringify({
+          query:userMessage.content
+        })
+      });
+
+      // If token expired, redirect to login
+      if (response.status === 401) {
+        logout();
+        navigate('/login');
+        return;
+      }
+
+      const data = await response.json();
       setMessages(prev => [...prev, { 
         id: (Date.now() + 1).toString(), 
         role: 'ai', 
-        content: response, 
+        content: data.answer || data.response || "No response found.", 
         timestamp: new Date(),
-        sources: ['doc_123.pdf', 'policy_v2.docx'] // Mock sources
+        sources: data.sources || []
       }]);
       setIsTyping(false);
-    }, 1500);
+    } catch(error) {
+      console.log(error);
+      setIsTyping(false);
+    }
   };
 
-  const generateMockResponse = (query, role) => {
-    // Guardrail simulation
-    if (query.toLowerCase().includes('salary') || query.toLowerCase().includes('confidential')) {
-      return "⚠️ **Guardrail Triggered**: Access to sensitive data like salaries is restricted. Please contact HR for official inquiries.";
-    }
-    
-    switch(role) {
-      case 'engineering':
-        return "Based on the technical documentation, our current microservices architecture uses gRPC for inter-service communication. You can find more details in the `Arch-2024.pdf` document.";
-      case 'finance':
-        return "The Q4 financial projections indicate a 15% increase in operational efficiency. This data is retrieved from the `Fiscal-Reports-Q4.xlsx` source.";
-      default:
-        return "I've searched the available internal documents. Could you please specify which project or department this query relates to?";
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await axios.post(`${API_URL}/chat/upload-resume`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      const successMsg = { 
+        id: Date.now().toString(), 
+        role: 'ai', 
+        content: `✅ Successfully uploaded **${file.name}** and indexed ${response.data.chunks_indexed} chunks! You can now ask me questions about it.`, 
+        timestamp: new Date() 
+      };
+      setMessages(prev => [...prev, successMsg]);
+      
+    } catch (error) {
+       console.error(error);
+       const errorMsg = { 
+        id: Date.now().toString(), 
+        role: 'ai', 
+        content: `❌ Failed to upload ${file.name}: ${error.response?.data?.detail || error.message}`, 
+        timestamp: new Date() 
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
   return (
-    <div className="flex h-screen bg-[#0f172a] overflow-hidden text-[#f8fafc]">
-      {/* Sidebar */}
-      <motion.aside 
-        initial={false}
-        animate={{ width: sidebarOpen ? 280 : 0, opacity: sidebarOpen ? 1 : 0 }}
-        className="bg-[#1e293b] border-r border-[#334155] flex flex-col relative z-20 shrink-0"
-      >
-        <div className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-xl tracking-tight">SecureRAG</span>
-          </div>
-        </div>
-
-        <button className="mx-4 mt-2 flex items-center justify-center gap-2 bg-[#0f172a] hover:bg-blue-600 border border-[#334155] rounded-lg py-2.5 transition-all group">
-          <Plus className="w-4 h-4 text-blue-400 group-hover:text-white transition-colors" />
-          <span className="font-medium text-sm">New Conversation</span>
-        </button>
-
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-          <div>
-            <h3 className="text-xs font-semibold text-[#64748b] uppercase tracking-wider mb-3 px-1">Recent Chats</h3>
-            <div className="space-y-1">
-              {['API Integration Help', 'Security Policy Review', 'Quarterly Goals'].map((chat, i) => (
-                <button key={i} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#0f172a]/50 text-[#94a3b8] hover:text-white transition-all text-sm text-left group">
-                  <MessageSquare className="w-4 h-4 shrink-0 opacity-50 group-hover:opacity-100" />
-                  <span className="truncate">{chat}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-xs font-semibold text-[#64748b] uppercase tracking-wider mb-3 px-1">Internal Documents</h3>
-            <div className="space-y-1">
-               <div className="flex items-center gap-3 px-3 py-2 text-sm text-[#4d7c0f] bg-[#4d7c0f]/10 rounded-lg border border-[#4d7c0f]/20">
-                 <Database className="w-4 h-4" />
-                 <span>{(user?.role || '').toUpperCase()} Documents</span>
-               </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 border-t border-[#334155] space-y-3">
-          {user?.role === 'admin' && (
-            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#0f172a] text-[#f59e0b] transition-all text-sm font-medium">
-              <Settings className="w-4 h-4" />
-              Admin Dashboard
-            </button>
-          )}
-          <div className="flex items-center justify-between bg-[#0f172a]/30 p-2 rounded-xl backdrop-blur-sm border border-[#334155]/50">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-bold border border-white/10 shadow-lg">
-                <User className="w-5 h-5" />
-              </div>
-              <div className="overflow-hidden">
-                <p className="text-sm font-semibold truncate max-w-[120px]">{user?.email}</p>
-                <p className="text-[10px] text-[#64748b] uppercase tracking-tighter">{user?.role}</p>
-              </div>
-            </div>
-            <button onClick={logout} className="p-2 text-[#64748b] hover:text-red-400 transition-colors bg-[#0f172a] rounded-lg border border-[#334155]">
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </motion.aside>
-
+    <div className="flex justify-center h-screen bg-[#f3f4f6] overflow-hidden text-[#111827] font-sans selection:bg-blue-100 relative">
+      
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative min-w-0">
+      <main className="flex-1 flex flex-col relative min-w-0 h-full max-w-5xl w-full bg-white shadow-xl border-x border-[#e5e7eb]">
         {/* Header */}
-        <header className="h-16 border-b border-[#334155] bg-[#0f172a]/80 backdrop-blur-md flex items-center justify-between px-6 z-10">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-[#1e293b] rounded-lg transition-colors text-[#94a3b8] md:block hidden"
-            >
-              <History className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-lg flex items-center gap-2">
-                Secure Session 
-                <span className="inline-flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+        <header className="h-16 border-b border-[#e5e7eb] bg-white/95 backdrop-blur-md flex items-center justify-between px-6 z-10 sticky top-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
+              <Shield className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-[15px] tracking-tight text-[#111827] flex items-center gap-2">
+                SecureRAG
               </h2>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                <span className="text-[10px] text-[#6b7280] font-medium tracking-wide">System Online</span>
+              </div>
             </div>
           </div>
           
           <div className="flex items-center gap-3">
-             <div className="hidden lg:flex items-center gap-2 bg-[#1e293b] px-3 py-1.5 rounded-full border border-[#334155] text-xs">
-                <ShieldAlert className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-[#94a3b8]">RBAC Filtering Enabled</span>
+             <div className="hidden lg:flex items-center gap-1.5 bg-[#f9fafb] px-3 py-1.5 rounded-md border border-[#e5e7eb] text-xs">
+                <Shield className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="text-[#4b5563] font-medium tracking-wide">Open Access Mode</span>
              </div>
-             <div className="h-8 w-[1px] bg-[#334155] mx-1"></div>
-             <button className="p-2 hover:bg-[#1e293b] rounded-lg transition-colors text-[#94a3b8]">
-               <Settings className="w-5 h-5" />
-             </button>
+             
+             {user?.role === 'admin' && (
+              <button 
+                onClick={() => window.location.href='/admin'} 
+                className="px-3 py-1.5 bg-[#f8fafc] hover:bg-[#f1f5f9] text-[#334155] border border-[#cbd5e1] rounded-md transition-all text-xs font-medium tracking-wide shadow-sm"
+              >
+                Admin Area
+              </button>
+             )}
+
+             <div className="h-6 w-[1px] bg-[#e5e7eb] mx-1"></div>
+             
+             <div className="flex items-center gap-2 bg-[#f9fafb] px-2 py-1 rounded-md border border-[#e5e7eb]">
+                <div className="w-6 h-6 rounded-md bg-white flex items-center justify-center text-xs font-bold border border-[#e5e7eb] shadow-sm">
+                  <User className="w-3.5 h-3.5 text-[#4b5563]" />
+                </div>
+                <div className="hidden md:block">
+                  <p className="text-xs font-medium text-[#111827] max-w-[120px] truncate">{user?.email}</p>
+                </div>
+                <button onClick={logout} className="p-1 ml-1 text-[#6b7280] hover:text-red-500 hover:bg-[#f3f4f6] rounded-md transition-colors">
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+             </div>
           </div>
         </header>
 
         {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-8 space-y-8 scrollbar-hide">
-          <div className="max-w-4xl mx-auto space-y-8">
+        <div className="flex-1 overflow-y-auto px-4 py-8 space-y-8 scrollbar-hide relative z-0 bg-[#f9fafb]">
+          <div className="max-w-3xl mx-auto space-y-8">
             <AnimatePresence initial={false}>
               {messages.map((message) => (
                 <motion.div
@@ -194,25 +202,25 @@ const ChatPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className={`flex items-start gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-lg ${
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1 shadow-sm ${
                     message.role === 'ai' 
-                      ? 'bg-blue-600 border border-blue-400/30' 
-                      : 'bg-[#1e293b] border border-[#334155]'
+                      ? 'bg-blue-600 border border-blue-500' 
+                      : 'bg-white border border-[#e5e7eb]'
                   }`}>
-                    {message.role === 'ai' ? <Shield className="w-5 h-5 text-white" /> : <User className="w-5 h-5 text-white" />}
+                    {message.role === 'ai' ? <Shield className="w-4 h-4 text-white" /> : <User className="w-4 h-4 text-[#4b5563]" />}
                   </div>
                   
-                  <div className={`flex flex-col space-y-2 max-w-[80%] ${message.role === 'user' ? 'items-end' : ''}`}>
-                    <div className={`px-5 py-3.5 rounded-2xl text-[15px] leading-relaxed shadow-xl ${
+                  <div className={`flex flex-col space-y-1.5 max-w-[85%] ${message.role === 'user' ? 'items-end' : ''}`}>
+                    <div className={`px-5 py-3.5 rounded-2xl text-[14px] leading-relaxed shadow-sm ${
                       message.role === 'ai' 
-                        ? 'bg-[#1e293b] border border-[#334155] text-white' 
-                        : 'bg-blue-600 text-white border border-blue-400/20'
+                        ? 'bg-white border border-[#e5e7eb] text-[#1f2937] rounded-tl-sm' 
+                        : 'bg-blue-600 text-white border border-blue-500 rounded-tr-sm'
                     }`}>
-                      <div className="chat-bubble-content">
+                      <div className="chat-bubble-content font-normal tracking-wide">
                         {message.content.split('\n').map((para, i) => (
                            <p key={i} className={i > 0 ? "mt-3" : ""}>
                              {para.includes('⚠️') ? (
-                               <span className="flex items-start gap-2 text-amber-400 italic">
+                               <span className="flex items-start gap-2 text-amber-600 font-medium bg-amber-50 px-2 py-1 rounded">
                                  {para}
                                </span>
                              ) : para}
@@ -220,19 +228,21 @@ const ChatPage = () => {
                         ))}
                       </div>
                       
-                      {message.sources && (
-                        <div className="mt-4 pt-4 border-t border-[#334155] flex flex-wrap gap-2">
-                          <span className="text-[10px] text-[#64748b] font-bold uppercase tracking-widest w-full mb-1">Retrieval Sources:</span>
+                      {message.sources && message.role === 'ai' && message.id !== '1' && message.sources.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-[#f3f4f6] flex flex-wrap gap-2">
+                          <span className="text-[10px] text-[#9ca3af] font-bold uppercase tracking-widest w-full mb-1 flex items-center gap-1.5">
+                            <Database className="w-3 h-3" /> Retrieved Context:
+                          </span>
                           {message.sources.map((src, i) => (
-                            <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-[#0f172a] rounded-md border border-[#334155] text-xs text-blue-400 cursor-help hover:border-blue-500/50 transition-colors">
-                              <FileText className="w-3 h-3" />
-                              {src}
+                            <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f9fafb] rounded-md border border-[#e5e7eb] text-xs text-[#4b5563] cursor-help hover:bg-[#f3f4f6] transition-all">
+                              <FileText className="w-3.5 h-3.5 text-blue-500" />
+                              <span className="truncate max-w-[200px]">{src?.filename || src}</span>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
-                    <span className="text-[10px] text-[#475569] font-medium uppercase px-2">
+                    <span className="text-[10px] text-[#9ca3af] font-medium uppercase tracking-wider px-1">
                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -242,58 +252,79 @@ const ChatPage = () => {
             
             {isTyping && (
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
                 className="flex items-start gap-4"
               >
-                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 animate-pulse">
-                  <Shield className="w-5 h-5 text-white" />
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 mt-1 shadow-sm">
+                  <Shield className="w-4 h-4 text-white animate-pulse" />
                 </div>
-                <div className="bg-[#1e293b] border border-[#334155] px-6 py-4 rounded-2xl flex items-center gap-3">
+                <div className="bg-white border border-[#e5e7eb] shadow-sm px-5 py-4 rounded-2xl rounded-tl-sm flex items-center gap-3">
                    <div className="flex gap-1.5 items-center">
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></div>
                    </div>
-                   <span className="text-xs text-[#64748b] font-medium">Analyzing documents...</span>
+                   <span className="text-xs text-[#6b7280] font-medium tracking-wide ml-1">SecureRAG is thinking...</span>
                 </div>
               </motion.div>
             )}
-            <div ref={messagesEndRef} className="h-4" />
+            <div ref={messagesEndRef} className="h-6" />
           </div>
         </div>
 
         {/* Input Area */}
-        <div className="p-6 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent">
-          <div className="max-w-4xl mx-auto">
-            {/* Context chip */}
-            <div className="flex items-center gap-2 mb-3 ml-2">
-               <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20 text-[10px] text-blue-400 font-bold uppercase tracking-wider">
-                 <Database className="w-3 h-3" />
-                 {user?.role} context
+        <div className="p-4 bg-white border-t border-[#e5e7eb] pb-8">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-center gap-2 mb-3 px-1">
+               <span className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f9fafb] rounded-md border border-[#e5e7eb] text-[10px] text-[#6b7280] font-medium uppercase tracking-widest">
+                 <Database className="w-3 h-3 text-blue-500" />
+                 All Internal Knowledge
                </span>
-               <span className="h-1 w-1 rounded-full bg-[#334155]"></span>
-               <span className="text-[10px] text-[#64748b] font-medium uppercase">Claude 3.5 Sonnet Integration</span>
+               <span className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f9fafb] rounded-md border border-[#e5e7eb] text-[10px] text-[#6b7280] font-medium uppercase tracking-widest">
+                 <FileUp className="w-3 h-3 text-blue-500" />
+                 Upload Context Supported
+               </span>
             </div>
 
-            <form onSubmit={handleSend} className="relative group">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Ask about ${user?.role} specific documents...`}
-                className="w-full bg-[#1e293b] border border-[#334155] focus:border-blue-500/50 rounded-2xl pl-6 pr-16 py-5 focus:outline-none focus:ring-4 focus:ring-blue-500/5 shadow-2xl transition-all placeholder:text-[#475569]"
+            <form onSubmit={handleSend} className="relative group flex items-start gap-3">
+              <input 
+                 type="file" 
+                 accept=".pdf" 
+                 ref={fileInputRef}
+                 onChange={handleFileUpload}
+                 className="hidden" 
               />
-              <button 
-                type="submit"
-                disabled={!input.trim() || isTyping}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-blue-600 hover:bg-blue-500 disabled:bg-[#334155] disabled:cursor-not-allowed rounded-xl text-white transition-all shadow-lg shadow-blue-600/20 active:scale-95 group-hover:scale-105"
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                title="Upload Resume or Context"
+                className="shrink-0 h-12 w-12 bg-white hover:bg-[#f3f4f6] border border-[#e5e7eb] shadow-sm rounded-xl text-[#6b7280] transition-all flex items-center justify-center disabled:opacity-50"
               >
-                <Send className="w-5 h-5" />
+                {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
               </button>
+              
+              <div className="relative w-full flex bg-white border border-[#d1d5db] shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 rounded-xl transition-all">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={`Send a secure message...`}
+                  className="w-full bg-transparent pl-4 pr-14 py-3.5 text-[14px] text-[#111827] focus:outline-none placeholder:text-[#9ca3af] font-normal"
+                />
+                <button 
+                  type="submit"
+                  disabled={!input.trim() || isTyping}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-[#f3f4f6] disabled:text-[#9ca3af] text-white rounded-lg transition-all shadow-sm"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
             </form>
-            <p className="text-center text-[10px] text-[#475569] mt-4 font-medium uppercase tracking-widest">
-              Security Notice: All interactions are logged for compliance and safety.
+            <p className="text-center text-[10px] text-[#9ca3af] mt-4 font-medium flex items-center justify-center gap-1.5">
+              <ShieldAlert className="w-3 h-3" />
+              Secure interactions. AI guardrails are active.
             </p>
           </div>
         </div>

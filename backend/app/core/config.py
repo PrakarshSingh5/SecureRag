@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173"]
 
-    # --- Claude API ---
-    ANTHROPIC_API_KEY: str
+    # --- Gemini API ---
+    GEMINI_API_KEY: str
 
     # --- JWT ---
     SECRET_KEY: str

@@ -7,7 +7,7 @@ LEARNING NOTE: How RAG works step by step:
   1. USER QUERY comes in (e.g., "What is our API authentication policy?")
   2. EMBED the query → convert it to a vector (a list of numbers)
   3. SEARCH FAISS → find document chunks with similar embeddings (semantic search)
-  4. FILTER by ROLE → only return chunks the user is allowed to see (RBAC)
+  4. FILTER by ROLE → only return chunks the user is allowed to see (RBAC) (REMOVED)
   5. BUILD PROMPT → combine retrieved chunks + original query into a prompt
   6. CALL CLAUDE → send the prompt to the LLM and get an answer
   7. RETURN ANSWER + SOURCES
@@ -16,10 +16,10 @@ LEARNING NOTE: How RAG works step by step:
   it ONLY answers from the documents you give it as context.
 """
 
-from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.services.guardrails import check_input_guardrails, check_output_guardrails, GuardrailViolation
@@ -53,12 +53,12 @@ class RAGService:
             model_name="all-MiniLM-L6-v2"  # Small, fast, good quality
         )
 
-        # Load the Claude LLM
-        self.llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
-            api_key=settings.ANTHROPIC_API_KEY,
-            temperature=0,  # 0 = deterministic answers (better for RAG)
-            max_tokens=1024,
+        # Load the Gemin LLM
+        self.llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            google_api_key=settings.GEMINI_API_KEY,
+            temperature=0,
+            max_output_tokens=1024,
         )
 
         # FAISS vector store (loaded from disk if it exists)
@@ -78,13 +78,12 @@ class RAGService:
                 logger.warning("No FAISS index found. Upload documents first.")
         return self._vector_store
 
-    def query(self, user_query: str, user_role: str) -> ChatResponse:
+    def query(self, user_query: str) -> ChatResponse:
         """
         Main entry point: run the full RAG pipeline for a user query.
 
         Args:
             user_query: The user's question
-            user_role: The RBAC role (used to filter documents)
 
         Returns:
             ChatResponse with answer and sources
@@ -107,16 +106,12 @@ class RAGService:
         # Retrieve top-k most relevant chunks, then filter by role
         raw_docs = vector_store.similarity_search_with_score(user_query, k=10)
 
-        # RBAC Filter: only keep docs where metadata["role"] matches user's role
-        filtered_docs = [
-            (doc, score)
-            for doc, score in raw_docs
-            if doc.metadata.get("role") == user_role
-        ]
+        # No RBAC Filter: allow access to all documents
+        filtered_docs = raw_docs
 
         if not filtered_docs:
             return ChatResponse(
-                answer=f"I don't have access to documents relevant to your query for the '{user_role}' role.",
+                answer="No documents found in the database.",
                 guardrail_triggered=False,
             )
 
@@ -143,8 +138,15 @@ class RAGService:
         ]
 
         logger.info(f"Calling Claude with {len(top_docs)} context chunks...")
-        response = self.llm.invoke(messages)
-        raw_answer = response.content
+        try:
+            response = self.llm.invoke(messages)
+            raw_answer = response.content
+        except Exception as e:
+            logger.error(f"Anthropic API Error: {e}")
+            return ChatResponse(
+                answer=f"⚠️ LLM Provider Error: {str(e)}",
+                guardrail_triggered=False,
+            )
 
         # STEP 6: Output Guardrail Check
         final_answer, guardrail_triggered = check_output_guardrails(
